@@ -52,7 +52,13 @@ final class KeepAwakeSwitch: Switch {
         guard assertionID != 0 else { return false }
         // Copies the properties of one assertion; nil if it no longer exists.
         // "Copy" in a CoreFoundation name means we own the result and must release it.
-        guard let props = IOPMAssertionCopyProperties(assertionID) else { return false }
+        guard let props = IOPMAssertionCopyProperties(assertionID) else {
+            // Gone: the timeout released it. Forget the ID so later reads
+            // skip the IOKit call.
+            assertionID = 0
+            deadline = nil
+            return false
+        }
         props.release()
         return true
     }
@@ -83,8 +89,14 @@ final class KeepAwakeSwitch: Switch {
             if let duration {
                 // IOPMLib's kIOPMAssertionTimeoutKey / ...ActionKey / ...ActionRelease
                 // are CFSTR() macros, which Swift can't import; these are their values.
-                IOPMAssertionSetProperty(newID, "TimeoutSeconds" as CFString, duration as CFNumber)
-                IOPMAssertionSetProperty(newID, "TimeoutAction" as CFString, "TimeoutActionRelease" as CFString)
+                let a = IOPMAssertionSetProperty(newID, "TimeoutSeconds" as CFString, duration as CFNumber)
+                let b = IOPMAssertionSetProperty(newID, "TimeoutAction" as CFString, "TimeoutActionRelease" as CFString)
+                guard a == kIOReturnSuccess, b == kIOReturnSuccess else {
+                    // Don't leave an untimed assertion that the row claims is timed.
+                    IOPMAssertionRelease(newID)
+                    assertionID = 0
+                    throw SwitchError(message: "Couldn't set the timer (\(a == kIOReturnSuccess ? b : a))")
+                }
                 deadline = Date().addingTimeInterval(duration)
             }
         } else {

@@ -1,18 +1,35 @@
 #!/bin/zsh
-# Build Levers and wrap the binary into Levers.app.
+# Build Levers and wrap the binary into an .app.
+#
+#   ./scripts/bundle.sh          → build/Levers Dev.app  (dev build, the default)
+#   ./scripts/bundle.sh release  → build/Levers.app      (what install.sh installs)
+#
+# Dev and release are two different apps to macOS: different bundle IDs, so
+# separate permissions, settings and login items. Rebuilding the dev app
+# never disturbs the copy you use every day.
 #
 # Without Xcode there is no app target, so we assemble the bundle by hand.
 # A .app is just a folder layout macOS recognizes:
 #   Levers.app/Contents/Info.plist      ← metadata (LSUIElement hides the Dock icon)
-#   Levers.app/Contents/MacOS/Levers  ← the executable
+#   Levers.app/Contents/MacOS/Levers    ← the executable
 set -euo pipefail
 cd "${0:A:h}/.."
 
-CONFIG="${1:-release}"
-swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Levers"
+MODE="${1:-dev}"
+case "$MODE" in
+  dev)     BUNDLE_ID="io.github.jptramos.levers.dev"; NAME="Levers Dev" ;;
+  release) BUNDLE_ID="io.github.jptramos.levers";     NAME="Levers" ;;
+  *) echo "usage: $0 [dev|release]" >&2; exit 2 ;;
+esac
 
-APP="build/Levers.app"
+VERSION="$(<VERSION)"
+# Build number: commits so far (always increases); 1 outside a git checkout.
+BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+
+swift build -c release
+BIN="$(swift build -c release --show-bin-path)/Levers"
+
+APP="build/$NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Levers"
@@ -22,18 +39,18 @@ cp "$BIN" "$APP/Contents/MacOS/Levers"
 [[ -f Resources/AppIcon.icns ]] || swift scripts/make-icon.swift
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key>        <string>io.github.jptramos.levers</string>
-    <key>CFBundleName</key>              <string>Levers</string>
+    <key>CFBundleIdentifier</key>        <string>$BUNDLE_ID</string>
+    <key>CFBundleName</key>              <string>$NAME</string>
     <key>CFBundleExecutable</key>        <string>Levers</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleIconFile</key>          <string>AppIcon</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key>           <string>1</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key>           <string>$BUILD</string>
     <key>LSMinimumSystemVersion</key>    <string>26.0</string>
     <!-- Menubar-only: no Dock icon, no app menu. -->
     <key>LSUIElement</key>               <true/>
@@ -44,7 +61,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc signature ("-"): no developer account needed. macOS privacy (TCC)
-# keys permissions to the signature, so a rebuild may re-prompt Automation.
-codesign --force --sign - "$APP"
-echo "Built $APP"
+# Signing. macOS ties privacy permissions (Accessibility, Automation) to the
+# app's signature. An ad-hoc signature ("-") is a fingerprint of these exact
+# bytes, so every rebuild looks like a new app and keyboard access is lost.
+# A signing certificate is stable: macOS then matches "bundle ID + certificate",
+# and permissions survive rebuilds. Make one free in Keychain Access
+# (Certificate Assistant → Create a Certificate → Code Signing), named
+# "Levers Local Signing", or point LEVERS_SIGN_ID at your own.
+SIGN_ID="${LEVERS_SIGN_ID:-Levers Local Signing}"
+if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$SIGN_ID\""; then
+  codesign --force --sign "$SIGN_ID" "$APP"
+  echo "Built $APP $VERSION ($BUILD), signed with \"$SIGN_ID\""
+else
+  codesign --force --sign - "$APP"
+  echo "Built $APP $VERSION ($BUILD), ad-hoc signed (no \"$SIGN_ID\" certificate found:"
+  echo "  keyboard access must be re-granted after each rebuild; see the comment in this script)"
+fi

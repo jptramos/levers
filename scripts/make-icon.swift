@@ -74,4 +74,5 @@ p.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 p.arguments = ["-c", "icns", iconset.path, "-o", out.path]
 try! p.run(); p.waitUntilExit()
 precondition(p.terminationStatus == 0, "iconutil failed")
+try? FileManager.default.removeItem(at: iconset)  // the PNGs are inside the .icns now
 print("Wrote \(out.path)")

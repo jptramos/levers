@@ -15,6 +15,11 @@ final class SwitchBoard: ObservableObject {
         LockKeyboardSwitch(),
     ]
     @Published private(set) var tick = 0
+    /// Login-item status, read once per refresh. `SMAppService.status` is a
+    /// call into another process, so the footer must not ask on every redraw
+    /// (an Edit-mode drag redraws the panel on every mouse move).
+    @Published private(set) var loginOn = false
+    @Published private(set) var loginNeedsApproval = false
     @Published var lastError: String?
     @Published var lastErrorSettings: URL?
     @Published var editing = false
@@ -47,7 +52,10 @@ final class SwitchBoard: ObservableObject {
         let saved = UserDefaults.standard.stringArray(forKey: Key.order) ?? []
         // Keep the saved order, drop ids that no longer exist, and append
         // switches added in a newer build at the end.
-        order = saved.filter(ids.contains) + ids.filter { !saved.contains($0) }
+        // `seen` also drops duplicates, so a corrupted plist can't give two
+        // rows the same id.
+        var seen = Set<String>()
+        order = (saved + ids).filter { ids.contains($0) && seen.insert($0).inserted }
         hidden = Set(UserDefaults.standard.stringArray(forKey: Key.hidden) ?? [])
         flips = UserDefaults.standard.dictionary(forKey: Key.flips) as? [String: Int] ?? [:]
         showFlips = UserDefaults.standard.object(forKey: Key.showFlips) as? Bool ?? true
@@ -63,7 +71,14 @@ final class SwitchBoard: ObservableObject {
         ordered.filter { !hidden.contains($0.id) }
     }
 
-    func refresh() { tick += 1 }
+    func refresh() {
+        // Assign only on change: setting a @Published property, even to the
+        // same value, redraws every observer.
+        let on = LoginItem.isOn, approval = LoginItem.needsApproval
+        if loginOn != on { loginOn = on }
+        if loginNeedsApproval != approval { loginNeedsApproval = approval }
+        tick += 1
+    }
 
     /// `byUser`: a flip from the panel, which counts. Auto-offs (hiding a
     /// switch) and test hooks don't.
@@ -168,8 +183,8 @@ struct RowMenu: View {
     var body: some View {
         let shown = !board.hidden.contains(item.id)
         if shown {
-            Button("Move Up") { withAnimation(.snappy) { board.moveShown(item.id, by: -1) } }
-            Button("Move Down") { withAnimation(.snappy) { board.moveShown(item.id, by: 1) } }
+            Button("Move Up") { _ = withAnimation(.snappy) { board.moveShown(item.id, by: -1) } }
+            Button("Move Down") { _ = withAnimation(.snappy) { board.moveShown(item.id, by: 1) } }
             Divider()
         }
         Button(shown ? "Hide \(item.name)" : "Show \(item.name)") {
@@ -313,6 +328,9 @@ extension View {
     }
 }
 
+/// "Levers", or "Levers Dev" for a dev build, so you can tell them apart.
+let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Levers"
+
 struct PanelView: View {
     @ObservedObject var board: SwitchBoard
 
@@ -344,14 +362,22 @@ struct PanelView: View {
         .frame(width: RowMetrics.panelWidth)
         .onAppear { board.refresh() }  // re-read every time the panel opens
         // While open, re-read every 15 s so a Keep Awake timeout shows up.
-        .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in board.refresh() }
+        // `.task` starts once when the panel appears and is cancelled when it
+        // closes. (A Timer.publish built inside `body` was a new timer on
+        // every redraw.)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                board.refresh()
+            }
+        }
     }
 
     /// Title + Edit/Done at the top right (HIG: editing controls sit with
     /// the list they edit, apart from app-level actions like Quit).
     private var header: some View {
         HStack {
-            Text("Levers").font(.title3.weight(.semibold))
+            Text(appName).font(.title3.weight(.semibold))
             Spacer()
             if board.editing {
                 Button("Done") { toggleEditing() }
@@ -374,14 +400,13 @@ struct PanelView: View {
     /// App settings + Quit. A checkbox, not a switch: it changes Levers
     /// itself, so it shouldn't look like one of the system levers above.
     private var footer: some View {
-        let _ = board.tick  // re-read login status on every refresh
-        return VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             Toggle("Launch at Login", isOn: Binding(
-                get: { LoginItem.isOn },
+                get: { board.loginOn },
                 set: { board.setLaunchAtLogin($0) }
             ))
             .toggleStyle(.checkbox)
-            if LoginItem.needsApproval {
+            if board.loginNeedsApproval {
                 // Registered, but switched off in System Settings.
                 Button("Turned off in Login Items. Open Settings…") { LoginItem.openSettings() }
                     .buttonStyle(.link)
@@ -393,7 +418,7 @@ struct PanelView: View {
                     .toggleStyle(.checkbox)
             }
             HStack {
-                Button("Quit Levers") { NSApplication.shared.terminate(nil) }
+                Button("Quit \(appName)") { NSApplication.shared.terminate(nil) }
                     .buttonStyle(.borderless)
                 Spacer()
                 if board.showFlips { flipCount }

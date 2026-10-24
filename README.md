@@ -18,15 +18,15 @@ Free and open source (MIT). Needs **macOS 26** or later.
 There's no ready-made download yet, so you build it yourself. It takes about a minute, and you need only Apple's free Command Line Tools, not Xcode.
 
 1. Install the tools once, if you haven't: `xcode-select --install`
-2. Build Levers and put it in your Applications folder:
+2. Build Levers, install it to your Applications folder and open it:
 
 ```bash
 git clone https://github.com/jptramos/levers.git
 cd levers
-./scripts/bundle.sh
-cp -R build/Levers.app ~/Applications/
-open ~/Applications/Levers.app
+./scripts/install.sh
 ```
+
+To update later, `git pull` and run `./scripts/install.sh` again. Your layout and settings are kept.
 
 Levers appears in the menubar as three little sliders. It has no Dock icon.
 
@@ -39,7 +39,7 @@ Levers asks only when you first use a switch that needs it:
 
 If you say no by accident, the panel shows an **Open Settings…** link to fix it.
 
-If you rebuild Levers yourself, macOS treats each build as a new app for keyboard access. Switch Levers off and on again in that list.
+**After an update, keyboard access may need re-granting.** Without a signing certificate, macOS treats each build as a new app, and the old Levers entry in that list stops working even though it still shows as on. `install.sh` tells you when this happens. Remove the old entry with **−** (or run `tccutil reset Accessibility io.github.jptramos.levers`, which clears only Levers' entry), then flip Lock Keyboard and allow it again. To avoid this for good, create a free signing certificate named "Levers Local Signing" in Keychain Access (Certificate Assistant → Create a Certificate → type *Code Signing*). The scripts use it automatically.
 
 ## Turning things back
 

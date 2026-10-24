@@ -17,15 +17,23 @@ Launch at Login uses `SMAppService.mainApp` (macOS 13+), with no helper app or L
 
 ## Building without Xcode
 
+| Command | Builds | Use |
+|---|---|---|
+| `./scripts/bundle.sh` | `build/Levers Dev.app` (`io.github.jptramos.levers.dev`) | development: a separate app with its own permissions and settings, so rebuilding never disturbs your installed copy |
+| `./scripts/install.sh` | `build/Levers.app` → `~/Applications` | install or update the real app, relaunch it, check permissions |
+| `./scripts/release.sh [patch\|minor\|major]` | bumps `VERSION`, commits, tags `vX.Y.Z`, then installs | cutting a version |
+
+Signing: with a "Levers Local Signing" code-signing certificate in your keychain, builds are signed with it, and macOS keeps permissions across rebuilds (it matches bundle ID + certificate). Without it, builds are ad-hoc signed, which ties permissions to each exact build.
+
 With no Xcode project, `bundle.sh` assembles the `.app` by hand: the binary goes in `Contents/MacOS/`, plus an `Info.plist` (`LSUIElement` = no Dock icon) and the app icon. The icon is drawn in code by `scripts/make-icon.swift` and packed into `Resources/AppIcon.icns` with `iconutil`. The menubar glyph is drawn in code as a template image (`Sources/Levers/MenuBarGlyph.swift`).
 
 ## Test hooks
 
 ```bash
-build/Levers.app/Contents/MacOS/Levers --status        # print each switch's live state, exit
-build/Levers.app/Contents/MacOS/Levers --login on      # register the login item, exit (--login off removes it)
-open build/Levers.app --args --on keep-awake            # flip a switch at launch
-open build/Levers.app --args --off dark-mode
+"build/Levers Dev.app/Contents/MacOS/Levers" --status        # print each switch's live state, exit
+"build/Levers Dev.app/Contents/MacOS/Levers" --login on      # register the login item, exit (--login off removes it)
+open "build/Levers Dev.app" --args --on keep-awake            # flip a switch at launch
+open "build/Levers Dev.app" --args --off dark-mode
 pmset -g assertions | grep Levers                       # check Keep Awake
 ```
 
