@@ -1,79 +1,57 @@
 # Levers
 
-A small menubar app for macOS with four switches you flip from one panel:
+**A tiny Mac menubar panel of switches for the things you toggle all day.**
 
-- **Keep Awake**: keeps the screen on and the Mac awake, either until you turn it off or for 15 minutes to 8 hours (timer button).
-- **Dark Mode**: switches the system appearance.
-- **Hide Desktop Icons**: clears the desktop for screenshots and screen sharing.
-- **Lock Keyboard**: ignores every key so you can wipe the keyboard. The mouse keeps working, so you can always click it off.
+<img src="docs/panel.png" alt="The Levers panel: Keep Awake, Dark Mode, Hide Desktop Icons and Lock Keyboard switches" width="320"> <img src="docs/edit.png" alt="Edit mode: hide switches with the minus buttons, drag the handles to reorder" width="320">
 
-Show, hide and reorder switches with **Edit**. Turn on **Launch at Login** in the panel footer. A flip count sits at the bottom right; hover for the per-switch breakdown, right-click to hide or reset, or untick it in Edit.
+- ☕ **Keep Awake**: keeps your screen on and your Mac awake, until you turn it off or for a set time (15 minutes to 8 hours, using the timer button).
+- 🌙 **Dark Mode**: flips light and dark without opening System Settings.
+- 👁️ **Hide Desktop Icons**: a clean desktop for screenshots, demos and screen sharing.
+- ⌨️ **Lock Keyboard**: ignores every key so you can wipe the keyboard. The mouse still works, so you can always click it off.
 
-Requires **macOS 26** or later.
+Click **Edit** to hide switches you don't use or drag them into your own order. Tick **Launch at Login** to have it always there. The small number at the bottom right counts your flips; right-click it to hide it.
 
-## How each switch works
+Free and open source (MIT). Needs **macOS 26** or later.
 
-`isOn` always asks the system and never caches, so the panel stays right even if you change a setting somewhere else.
+## Install
 
-| Switch | Mechanism | Reads state from | Permission |
-|---|---|---|---|
-| Keep Awake | IOKit `IOPMAssertionCreateWithName` (`PreventUserIdleDisplaySleep`: screen and system stay awake), optional timeout the system enforces (`TimeoutActionRelease`) | `IOPMAssertionCopyProperties` on its own assertion | none |
-| Dark Mode | `NSAppleScript` → System Events `appearance preferences` | global pref `AppleInterfaceStyle` | Automation (asked once) |
-| Hide Desktop Icons | Finder pref `CreateDesktop` + Finder restart | `CFPreferencesCopyAppValue` on `com.apple.finder` | none |
-| Lock Keyboard | an active `CGEvent` tap that swallows key, modifier and media-key events | `CGEvent.tapIsEnabled` on its own tap | Accessibility |
+There's no ready-made download yet, so you build it yourself. It takes about a minute, and you need only Apple's free Command Line Tools, not Xcode.
 
-Launch at Login uses `SMAppService.mainApp` (macOS 13+), with no helper app or LaunchAgent.
-
-## Install (build from source)
-
-There's no signed download yet, so build it yourself. It takes about a minute. You need only the Xcode Command Line Tools (`xcode-select --install`), not Xcode.
+1. Install the tools once, if you haven't: `xcode-select --install`
+2. Build Levers and put it in your Applications folder:
 
 ```bash
 git clone https://github.com/jptramos/levers.git
 cd levers
-./scripts/bundle.sh          # swift build -c release → build/Levers.app (ad-hoc signed)
+./scripts/bundle.sh
 cp -R build/Levers.app ~/Applications/
 open ~/Applications/Levers.app
 ```
 
-An app you build yourself isn't quarantined, so Gatekeeper doesn't block it. Copy it to `~/Applications` before turning on Launch at Login, because `bundle.sh` deletes and rebuilds `build/`.
+Levers appears in the menubar as three little sliders. It has no Dock icon.
 
-**Permissions** are asked only when you first use the switch that needs them:
+## Permissions
 
-- Dark Mode asks to control System Events (Automation).
-- Lock Keyboard asks for keyboard access (Privacy & Security → Accessibility; on macOS 27 the list is called *Device Control and Data Access*).
+Levers asks only when you first use a switch that needs it:
 
-With an ad-hoc signature, macOS ties the Accessibility grant to the exact build, so **after a rebuild, switch Levers off and on again in that list**.
+- **Dark Mode** asks to control *System Events*. That's how apps are allowed to change system settings.
+- **Lock Keyboard** asks for access to your keyboard (System Settings → Privacy & Security → Accessibility; on macOS 27 it's called *Device Control and Data Access*).
 
-With no Xcode project, `bundle.sh` assembles the `.app` by hand: the binary goes in `Contents/MacOS/`, plus an `Info.plist` (`LSUIElement` = no Dock icon) and the app icon. The icon is drawn in code by `scripts/make-icon.swift` and packed into `Resources/AppIcon.icns` with `iconutil`. The menubar glyph is drawn in code as a template image (`Sources/Levers/MenuBarGlyph.swift`).
+If you say no by accident, the panel shows an **Open Settings…** link to fix it.
 
-## Test hooks
+If you rebuild Levers yourself, macOS treats each build as a new app for keyboard access. Switch Levers off and on again in that list.
 
-```bash
-build/Levers.app/Contents/MacOS/Levers --status        # print each switch's live state, exit
-build/Levers.app/Contents/MacOS/Levers --login on      # register the login item, exit (--login off removes it)
-open build/Levers.app --args --on keep-awake            # flip a switch at launch
-open build/Levers.app --args --off dark-mode
-pmset -g assertions | grep Levers                       # check Keep Awake
-```
+## Turning things back
 
-`open --args` is ignored if the app is already running. Quit it first.
+- **Keep Awake**: switch it off, or quit Levers.
+- **Dark Mode**: switch it off, or use System Settings → Appearance.
+- **Hide Desktop Icons**: switch it off. If Levers is gone, run `defaults delete com.apple.finder CreateDesktop; killall Finder`.
+- **Lock Keyboard**: click the switch off, or quit Levers.
+- **Launch at Login**: untick it, or remove Levers under System Settings → General → Login Items.
 
-## Gotchas (Command Line Tools + SwiftUI)
+## How it works
 
-- With a macOS 26 target, SwiftUI's `@State` is a Swift macro whose plugin ships only with Xcode. With just the Command Line Tools it fails ("plugin for module 'SwiftUIMacros' not found"). Use `@Published` on an `ObservableObject` instead.
-- Drag-to-reorder math must use `.global` coordinates. The row's own frame moves on every swap, so a `.local` translation jumps by a row.
-- A protocol-extension default (`stopsWhenHidden`) can only be overridden through `any Switch` if the protocol *declares* the property.
-- `kAXTrustedCheckOptionPrompt` is a C mutable global and won't compile under Swift 6 strict concurrency. Use its value, `"AXTrustedCheckOptionPrompt"`.
-- No asset catalog without Xcode (`actool`), so the icon is a classic `.icns`. It's drawn on Apple's 824pt grid so macOS 26 doesn't put it inside a gray tile.
-
-## Undo
-
-- Keep Awake: turn it off or quit. The system drops the assertion.
-- Dark Mode: System Settings → Appearance. Revoke access under Privacy & Security → Automation → Levers.
-- Hide Desktop Icons: turn it off, or run `defaults delete com.apple.finder CreateDesktop; killall Finder`.
-- Lock Keyboard: click the toggle off, or quit Levers. Remove its grant under Privacy & Security → Accessibility.
-- Launch at Login: untick it, or remove Levers in System Settings → General → Login Items.
+Curious what each switch actually calls, or how a Mac app gets built without Xcode? See **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**.
 
 ## License
 
