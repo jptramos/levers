@@ -2,12 +2,12 @@
 
 A small menubar app for macOS with four switches you flip from one panel:
 
-- **Keep Awake**: stops the Mac from idle-sleeping while it's on.
+- **Keep Awake**: keeps the screen on and the Mac awake, either until you turn it off or for 15 minutes to 8 hours (timer button).
 - **Dark Mode**: switches the system appearance.
 - **Hide Desktop Icons**: clears the desktop for screenshots and screen sharing.
 - **Lock Keyboard**: ignores every key so you can wipe the keyboard. The mouse keeps working, so you can always click it off.
 
-Show, hide and reorder switches with **Edit**. Turn on **Launch at Login** in the panel footer.
+Show, hide and reorder switches with **Edit**. Turn on **Launch at Login** in the panel footer. A flip count sits at the bottom right; hover for the per-switch breakdown, right-click to hide or reset, or untick it in Edit.
 
 Requires **macOS 26** or later.
 
@@ -17,7 +17,7 @@ Requires **macOS 26** or later.
 
 | Switch | Mechanism | Reads state from | Permission |
 |---|---|---|---|
-| Keep Awake | IOKit `IOPMAssertionCreateWithName` (`PreventUserIdleSystemSleep`) | `IOPMAssertionCopyProperties` on its own assertion | none |
+| Keep Awake | IOKit `IOPMAssertionCreateWithName` (`PreventUserIdleDisplaySleep`: screen and system stay awake), optional timeout the system enforces (`TimeoutActionRelease`) | `IOPMAssertionCopyProperties` on its own assertion | none |
 | Dark Mode | `NSAppleScript` → System Events `appearance preferences` | global pref `AppleInterfaceStyle` | Automation (asked once) |
 | Hide Desktop Icons | Finder pref `CreateDesktop` + Finder restart | `CFPreferencesCopyAppValue` on `com.apple.finder` | none |
 | Lock Keyboard | an active `CGEvent` tap that swallows key, modifier and media-key events | `CGEvent.tapIsEnabled` on its own tap | Accessibility |

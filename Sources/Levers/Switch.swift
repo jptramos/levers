@@ -19,11 +19,16 @@ protocol Switch: AnyObject {
     /// class's own value wins when called through `any Switch`.
     var stopsWhenHidden: Bool { get }
 
+    /// Optional second line under the name (e.g. Keep Awake's "Until 6:42 PM").
+    var detail: String? { get }
+
     /// Apply the change. Throws if the system refused (e.g. permission denied).
     func set(on: Bool) throws
 }
 
 extension Switch {
+    var detail: String? { nil }
+
     /// True for switches that keep something *running* (an assertion, an
     /// event tap). Hiding one of these turns it off first, so nothing runs
     /// invisibly. Settings (Dark Mode, desktop icons) keep their value.

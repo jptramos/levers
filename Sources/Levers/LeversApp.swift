@@ -27,11 +27,20 @@ final class SwitchBoard: ObservableObject {
     @Published var dragOffset: CGFloat = 0
     var dragBase: CGFloat = 0
 
+    /// Flip counter: how many times each switch was flipped from the panel.
+    /// Stored as a dictionary (id → count) so a per-switch breakdown is free.
+    @Published private(set) var flips: [String: Int] { didSet { defaults.set(flips, forKey: Key.flips) } }
+    @Published var showFlips: Bool { didSet { defaults.set(showFlips, forKey: Key.showFlips) } }
+    var totalFlips: Int { flips.values.reduce(0, +) }
+
     @Published private(set) var order: [String] { didSet { save() } }
     @Published private(set) var hidden: Set<String> { didSet { save() } }
 
     private let defaults = UserDefaults.standard
-    private enum Key { static let order = "switchOrder", hidden = "hiddenSwitches" }
+    private enum Key {
+        static let order = "switchOrder", hidden = "hiddenSwitches"
+        static let flips = "flipCounts", showFlips = "showFlipCount"
+    }
 
     init() {
         let ids = all.map(\.id)
@@ -40,6 +49,8 @@ final class SwitchBoard: ObservableObject {
         // switches added in a newer build at the end.
         order = saved.filter(ids.contains) + ids.filter { !saved.contains($0) }
         hidden = Set(UserDefaults.standard.stringArray(forKey: Key.hidden) ?? [])
+        flips = UserDefaults.standard.dictionary(forKey: Key.flips) as? [String: Int] ?? [:]
+        showFlips = UserDefaults.standard.object(forKey: Key.showFlips) as? Bool ?? true
     }
 
     /// Every switch, in the user's order (edit mode shows all of them).
@@ -54,9 +65,12 @@ final class SwitchBoard: ObservableObject {
 
     func refresh() { tick += 1 }
 
-    func set(_ s: any Switch, on: Bool) {
+    /// `byUser`: a flip from the panel, which counts. Auto-offs (hiding a
+    /// switch) and test hooks don't.
+    func set(_ s: any Switch, on: Bool, byUser: Bool = false) {
         do {
             try s.set(on: on)
+            if byUser { flips[s.id, default: 0] += 1 }
             lastError = nil
             lastErrorSettings = nil
         } catch {
@@ -97,6 +111,16 @@ final class SwitchBoard: ObservableObject {
             lastError = nil
         } catch {
             lastError = "Launch at Login: \(error.localizedDescription)"
+        }
+        refresh()
+    }
+
+    func resetFlips() { flips = [:] }
+
+    /// Keep Awake's timer menu.
+    func chooseKeepAwake(_ k: KeepAwakeSwitch, _ seconds: TimeInterval?) {
+        do { try k.choose(seconds); lastError = nil } catch {
+            lastError = "\(k.name): \(error.localizedDescription)"
         }
         refresh()
     }
@@ -170,19 +194,56 @@ struct SwitchRow: View {
                 .font(.system(size: RowMetrics.iconSize))
                 .frame(width: RowMetrics.iconColumn)
                 .accessibilityHidden(true)  // decorative; the toggle carries the meaning
-            Text(item.name).font(.system(size: RowMetrics.nameSize))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.name).font(.system(size: RowMetrics.nameSize))
+                if let detail = item.detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Spacer()
+            if let keepAwake = item as? KeepAwakeSwitch {
+                TimerMenu(keepAwake: keepAwake, board: board)
+            }
             // A real label for VoiceOver ("Keep Awake, switch, off"), hidden
             // visually because the Text already shows the name.
             Toggle(item.name, isOn: Binding(
                 get: { on },
-                set: { board.set(item, on: $0) }
+                set: { board.set(item, on: $0, byUser: true) }
             ))
             .toggleStyle(.switch)
             .labelsHidden()  // regular size: the 44pt rows have room for it
         }
         .glassRow()
         .contextMenu { RowMenu(item: item, board: board) }
+    }
+}
+
+/// Keep Awake's duration picker: a small timer button that opens a menu
+/// with a checkmark on the current choice.
+struct TimerMenu: View {
+    let keepAwake: KeepAwakeSwitch
+    @ObservedObject var board: SwitchBoard
+
+    var body: some View {
+        Menu {
+            // An inline Picker inside a Menu renders as checkmarked items.
+            Picker("Keep awake for", selection: Binding(
+                get: { keepAwake.duration ?? 0 },
+                set: { board.chooseKeepAwake(keepAwake, $0 > 0 ? $0 : nil) }
+            )) {
+                ForEach(KeepAwakeSwitch.durations, id: \.label) { d in
+                    Text(d.label).tag(d.seconds ?? 0)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "timer")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Keep awake for…")
+        .accessibilityLabel("Keep Awake duration")
     }
 }
 
@@ -282,6 +343,8 @@ struct PanelView: View {
         .padding(16)
         .frame(width: RowMetrics.panelWidth)
         .onAppear { board.refresh() }  // re-read every time the panel opens
+        // While open, re-read every 15 s so a Keep Awake timeout shows up.
+        .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in board.refresh() }
     }
 
     /// Title + Edit/Done at the top right (HIG: editing controls sit with
@@ -324,9 +387,37 @@ struct PanelView: View {
                     .buttonStyle(.link)
                     .font(.caption)
             }
-            Button("Quit Levers") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.borderless)
+            if board.editing {
+                // Customizing lives in Edit mode, so the counter's switch does too.
+                Toggle("Show flip count", isOn: $board.showFlips)
+                    .toggleStyle(.checkbox)
+            }
+            HStack {
+                Button("Quit Levers") { NSApplication.shared.terminate(nil) }
+                    .buttonStyle(.borderless)
+                Spacer()
+                if board.showFlips { flipCount }
+            }
         }
+    }
+
+    /// Bottom-right: total flips; hover for the per-switch breakdown,
+    /// right-click to hide or reset.
+    private var flipCount: some View {
+        let total = board.totalFlips
+        let breakdown = board.ordered
+            .map { "\($0.name): \(board.flips[$0.id, default: 0])" }
+            .joined(separator: "\n")
+        return Text("\(total) \(total == 1 ? "flip" : "flips")")
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .help(breakdown)
+            .contextMenu {
+                Button("Hide Flip Count") { board.showFlips = false }
+                Button("Reset Flip Count") { board.resetFlips() }
+            }
+            .accessibilityLabel("\(total) switch flips")
     }
 
     private func toggleEditing() {
