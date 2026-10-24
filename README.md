@@ -51,7 +51,7 @@ If you say no by accident, the panel shows an **Open Settings…** link to fix i
 
 ## How it works
 
-Curious what each switch actually calls, or how a Mac app gets built without Xcode? See **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**.
+Curious what each switch actually calls, or how a Mac app gets built without Xcode? See **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**. Want to add a lever? See **[docs/DEVELOPING.md](docs/DEVELOPING.md)**.
 
 ## License
 
