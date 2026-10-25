@@ -46,3 +46,16 @@ pmset -g assertions | grep Levers                       # check Keep Awake
 - A protocol-extension default (`stopsWhenHidden`) can only be overridden through `any Switch` if the protocol *declares* the property.
 - `kAXTrustedCheckOptionPrompt` is a C mutable global and won't compile under Swift 6 strict concurrency. Use its value, `"AXTrustedCheckOptionPrompt"`.
 - No asset catalog without Xcode (`actool`), so the icon is a classic `.icns`. It's drawn on Apple's 824pt grid so macOS 26 doesn't put it inside a gray tile.
+
+## Permissions in detail
+
+- Dark Mode asks to control *System Events* (Automation). Lock Keyboard asks for keyboard access (Privacy & Security → Accessibility; on macOS 27 it's *Device Control and Data Access*).
+- Without a signing certificate, each build is a new app to macOS for keyboard access, and the old Levers entry stops working even though it still shows as on. Remove it with **−** (or `tccutil reset Accessibility io.github.jptramos.levers`, which clears only Levers' entry), then allow the fresh prompt. A free "Levers Local Signing" code-signing certificate (Certificate Assistant → Create a Certificate → *Code Signing*) makes permissions survive rebuilds; the scripts use it automatically.
+
+## Turning things back (undo)
+
+- **Keep Awake**: switch it off, or quit Levers.
+- **Dark Mode**: switch it off, or use System Settings → Appearance.
+- **Hide Desktop Icons**: switch it off. If Levers is gone, run `defaults delete com.apple.finder CreateDesktop; killall Finder`.
+- **Lock Keyboard**: click the switch off, or quit Levers.
+- **Launch at Login**: untick it, or remove Levers under System Settings → General → Login Items.
