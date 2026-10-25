@@ -29,6 +29,12 @@ rm -f "$OUT"
 if [[ "$ACCESS" == "granted" ]]; then
   echo "Keyboard access: granted"
 else
-  echo "Keyboard access: NOT granted. Flip Lock Keyboard once and allow Levers."
-  echo "  If Levers is already listed but on, remove it with − first (it belongs to an older build)."
+  # Without a signing certificate each build is a new app to macOS, and the
+  # old Levers row in Settings stays "on" but no longer applies. Toggling it
+  # doesn't help; clearing it does. This removes only Levers' own entry.
+  tccutil reset Accessibility io.github.jptramos.levers >/dev/null
+  pkill -x -f "$DEST/Contents/MacOS/Levers" 2>/dev/null; sleep 1
+  open "$DEST"
+  echo "Keyboard access: cleared the old entry (it belonged to the previous build)."
+  echo "  Flip Lock Keyboard once and allow Levers in the prompt that appears."
 fi
