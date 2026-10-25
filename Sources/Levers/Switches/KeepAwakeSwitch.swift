@@ -15,7 +15,7 @@ import IOKit.pwr_mgt
 /// timeout action, the power manager drops the ticket when time is up, so
 /// the timer works even if Levers is busy or asleep. No Swift Timer needed.
 @MainActor
-final class KeepAwakeSwitch: Switch {
+final class KeepAwakeSwitch: TimedSwitch {
     let id = "keep-awake"
     let name = "Keep Awake"
     let onIcon = "cup.and.saucer.fill"
@@ -23,7 +23,7 @@ final class KeepAwakeSwitch: Switch {
     let stopsWhenHidden = true
 
     /// Choices in the row's timer menu. nil = until turned off.
-    static let durations: [(label: String, seconds: TimeInterval?)] = [
+    static let choices: [(label: String, seconds: TimeInterval?)] = [
         ("Until turned off", nil),
         ("15 minutes", 15 * 60),
         ("30 minutes", 30 * 60),
@@ -33,14 +33,19 @@ final class KeepAwakeSwitch: Switch {
         ("8 hours", 8 * 3600),
     ]
 
+    var durations: [(label: String, seconds: TimeInterval?)] { Self.choices }
+    let timerHelp = "Keep awake for…"
+
     private var assertionID: IOPMAssertionID = 0
     private(set) var deadline: Date?
 
     /// The chosen duration, remembered across launches (0 = until turned off).
     var duration: TimeInterval? {
         get {
+            // Only accept a duration the menu offers, so a hand-edited value
+            // (say, infinity) can't reach the timer or the clock text.
             let s = UserDefaults.standard.double(forKey: "keepAwakeSeconds")
-            return s > 0 ? s : nil
+            return Self.choices.compactMap(\.seconds).contains(s) ? s : nil
         }
         set { UserDefaults.standard.set(newValue ?? 0, forKey: "keepAwakeSeconds") }
     }

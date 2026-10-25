@@ -71,12 +71,16 @@ final class SwitchBoard: ObservableObject {
         ordered.filter { !hidden.contains($0.id) }
     }
 
-    func refresh() {
-        // Assign only on change: setting a @Published property, even to the
-        // same value, redraws every observer.
-        let on = LoginItem.isOn, approval = LoginItem.needsApproval
-        if loginOn != on { loginOn = on }
-        if loginNeedsApproval != approval { loginNeedsApproval = approval }
+    /// `countdownOnly`: a once-a-second countdown tick. It skips the
+    /// login-item check (a call into another process) and only redraws.
+    func refresh(countdownOnly: Bool = false) {
+        if !countdownOnly {
+            // Assign only on change: setting a @Published property, even to
+            // the same value, redraws every observer.
+            let on = LoginItem.isOn, approval = LoginItem.needsApproval
+            if loginOn != on { loginOn = on }
+            if loginNeedsApproval != approval { loginNeedsApproval = approval }
+        }
         tick += 1
     }
 
@@ -132,13 +136,16 @@ final class SwitchBoard: ObservableObject {
 
     func resetFlips() { flips = [:] }
 
-    /// Keep Awake's timer menu.
-    func chooseKeepAwake(_ k: KeepAwakeSwitch, _ seconds: TimeInterval?) {
-        do { try k.choose(seconds); lastError = nil } catch {
-            lastError = "\(k.name): \(error.localizedDescription)"
+    /// A row's ⏱ menu (Keep Awake, Lock Keyboard).
+    func chooseDuration(_ t: any TimedSwitch, _ seconds: TimeInterval?) {
+        do { try t.choose(seconds); lastError = nil } catch {
+            lastError = "\(t.name): \(error.localizedDescription)"
         }
         refresh()
     }
+
+    /// True while a shown switch is counting down (e.g. Lock Keyboard).
+    var anyCountingDown: Bool { visible.contains { $0.countsDown } }
 
     private func save() {
         defaults.set(order, forKey: Key.order)
@@ -147,7 +154,7 @@ final class SwitchBoard: ObservableObject {
 
     /// Test hooks:
     /// `Levers --status` prints each switch's live state, the layout, and exits.
-    /// `Levers --on keep-awake` / `--off dark-mode` flips a switch at launch.
+    /// Dev builds only: `--on keep-awake` / `--off dark-mode` flips a switch at launch.
     /// `Levers --login on|off` registers / unregisters the login item and exits.
     func applyLaunchArguments() {
         let args = CommandLine.arguments
@@ -160,6 +167,10 @@ final class SwitchBoard: ObservableObject {
             print("automation-system-events=\(Permissions.automation)")
             exit(0)
         }
+        // Everything below changes state, so it only works in Levers Dev.
+        // (Otherwise any program could launch the installed Levers with
+        // `--on lock-keyboard` and use its keyboard permission.)
+        guard isDevBuild else { return }
         if let i = args.firstIndex(of: "--login"), i + 1 < args.count {
             setLaunchAtLogin(args[i + 1] == "on")
             print(lastError ?? "launch-at-login=\(LoginItem.statusText)")
@@ -216,8 +227,8 @@ struct SwitchRow: View {
                 }
             }
             Spacer()
-            if let keepAwake = item as? KeepAwakeSwitch {
-                TimerMenu(keepAwake: keepAwake, board: board)
+            if let timed = item as? any TimedSwitch {
+                TimerMenu(item: timed, board: board)
             }
             // A real label for VoiceOver ("Keep Awake, switch, off"), hidden
             // visually because the Text already shows the name.
@@ -233,20 +244,21 @@ struct SwitchRow: View {
     }
 }
 
-/// Keep Awake's duration picker: a small timer button that opens a menu
-/// with a checkmark on the current choice.
+/// A row's duration picker: a small timer button that opens a menu with a
+/// checkmark on the current choice. Works for any `TimedSwitch`.
 struct TimerMenu: View {
-    let keepAwake: KeepAwakeSwitch
+    let item: any TimedSwitch
     @ObservedObject var board: SwitchBoard
 
     var body: some View {
         Menu {
             // An inline Picker inside a Menu renders as checkmarked items.
-            Picker("Keep awake for", selection: Binding(
-                get: { keepAwake.duration ?? 0 },
-                set: { board.chooseKeepAwake(keepAwake, $0 > 0 ? $0 : nil) }
+            // Tag 0 stands for "until turned off" (nil).
+            Picker(item.timerHelp, selection: Binding(
+                get: { item.duration ?? 0 },
+                set: { board.chooseDuration(item, $0 > 0 ? $0 : nil) }
             )) {
-                ForEach(KeepAwakeSwitch.durations, id: \.label) { d in
+                ForEach(item.durations, id: \.label) { d in
                     Text(d.label).tag(d.seconds ?? 0)
                 }
             }
@@ -257,8 +269,8 @@ struct TimerMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Keep awake for…")
-        .accessibilityLabel("Keep Awake duration")
+        .help(item.timerHelp)
+        .accessibilityLabel("\(item.name) duration")
     }
 }
 
@@ -366,9 +378,18 @@ struct PanelView: View {
         // closes. (A Timer.publish built inside `body` was a new timer on
         // every redraw.)
         .task {
+            // Wake each second while the panel is open (it's open only
+            // briefly): redraw every second during a countdown, so it starts
+            // ticking at once, and otherwise every 15 s.
+            var seconds = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                board.refresh()
+                try? await Task.sleep(for: .seconds(1))
+                seconds += 1
+                if board.anyCountingDown {
+                    board.refresh(countdownOnly: true)
+                } else if seconds % 15 == 0 {
+                    board.refresh()
+                }
             }
         }
     }

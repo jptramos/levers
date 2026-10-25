@@ -9,9 +9,12 @@ cd "${0:A:h}/.."
 
 DEST="$HOME/Applications/Levers.app"
 mkdir -p "$HOME/Applications"
-# Quit the running release copy (the "/Levers.app/" path never matches
-# "Levers Dev.app"). Quitting ends Keep Awake and Lock Keyboard if they're on.
-pkill -f "/Levers.app/Contents/MacOS/Levers" 2>/dev/null && sleep 1 || true
+# Quit the running installed copy: only processes named exactly "Levers"
+# whose executable is this app (not Levers Dev, not anything else).
+# Quitting ends Keep Awake and Lock Keyboard if they're on.
+for pid in $(pgrep -x Levers || true); do
+  [[ "$(ps -o comm= -p "$pid")" == "$DEST/Contents/MacOS/Levers" ]] && kill "$pid" && sleep 1
+done
 rm -rf "$DEST"
 cp -R build/Levers.app "$DEST"
 open "$DEST"

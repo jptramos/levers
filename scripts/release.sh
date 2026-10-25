@@ -14,6 +14,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Uncommitted changes. Commit or stash them first." >&2; exit 1
 fi
 
+[[ "$(<VERSION)" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || { echo "VERSION must look like 1.2.3" >&2; exit 1; }
 IFS=. read -r MAJ MIN PAT < VERSION
 case "${1:-patch}" in
   patch) PAT=$((PAT + 1)) ;;

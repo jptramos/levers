@@ -18,7 +18,7 @@ import CoreGraphics
 /// Crash safety: the tap belongs to this process. If Levers quits or
 /// is killed, the window server drops the tap and the keyboard is back.
 @MainActor
-final class LockKeyboardSwitch: Switch {
+final class LockKeyboardSwitch: TimedSwitch {
     let id = "lock-keyboard"
     let name = "Lock Keyboard"
     let onIcon = "keyboard.fill"
@@ -26,6 +26,41 @@ final class LockKeyboardSwitch: Switch {
     let stopsWhenHidden = true
 
     private var runLoopSource: CFRunLoopSource?
+
+    /// The lock always ends on its own: about as long as a wipe takes,
+    /// 45 s by default. There's deliberately no "until turned off" choice,
+    /// so the keyboard can never stay locked if the mouse is out of reach.
+    let durations: [(label: String, seconds: TimeInterval?)] = [
+        ("30 seconds", 30), ("45 seconds", 45), ("1 minute", 60),
+        ("2 minutes", 120), ("5 minutes", 300),
+    ]
+    let timerHelp = "Unlock after…"
+    private static let defaultSeconds: TimeInterval = 45
+
+    /// The chosen length, remembered across launches. A missing or
+    /// hand-edited value falls back to 45 s.
+    var duration: TimeInterval? {
+        let s = UserDefaults.standard.double(forKey: "lockSeconds")
+        return durations.compactMap(\.seconds).contains(s) ? s : Self.defaultSeconds
+    }
+
+    private var autoUnlock: Task<Void, Never>?
+    private(set) var unlockAt: Date?
+
+    /// A live countdown while locked: "Unlocks in 0:43".
+    var detail: String? {
+        guard isOn, let unlockAt else { return nil }
+        return "Unlocks in \(countdown(to: unlockAt))"
+    }
+    var countsDown: Bool { isOn }
+
+    func choose(_ seconds: TimeInterval?) throws {
+        UserDefaults.standard.set(seconds ?? Self.defaultSeconds, forKey: "lockSeconds")
+        if isOn {  // restart the countdown with the new length
+            unlock()
+            try lock()
+        }
+    }
 
     /// State check: ask the window server whether our tap is enabled.
     var isOn: Bool {
@@ -80,9 +115,20 @@ final class LockKeyboardSwitch: Switch {
 
         LockTap.port = tap
         runLoopSource = source
+
+        let seconds = duration ?? Self.defaultSeconds
+        unlockAt = Date().addingTimeInterval(seconds)
+        autoUnlock = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.unlock()
+        }
     }
 
     private func unlock() {
+        autoUnlock?.cancel()
+        autoUnlock = nil
+        unlockAt = nil
         guard let tap = LockTap.port else { return }
         CGEvent.tapEnable(tap: tap, enable: false)
         if let runLoopSource {

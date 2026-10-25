@@ -23,6 +23,7 @@ case "$MODE" in
 esac
 
 VERSION="$(<VERSION)"
+[[ "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || { echo "VERSION must look like 1.2.3, got: $VERSION" >&2; exit 1; }
 # Build number: commits so far (always increases); 1 outside a git checkout.
 BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
@@ -68,12 +69,25 @@ PLIST
 # and permissions survive rebuilds. Make one free in Keychain Access
 # (Certificate Assistant → Create a Certificate → Code Signing), named
 # "Levers Local Signing", or point LEVERS_SIGN_ID at your own.
+#
+# Hardened runtime (--options runtime): macOS refuses to load outside code
+# into Levers (DYLD_INSERT_LIBRARIES, unsigned libraries). Without it, any
+# program running as you could start Levers with its own code inside and
+# borrow Levers' keyboard and Automation permissions. The entitlements file
+# re-allows the one thing the runtime would otherwise block: Apple Events.
+# Strip extended attributes (quarantine, Finder info) from the bundle first:
+# codesign refuses to sign files that carry them ("detritus not allowed").
+xattr -cr "$APP"
 SIGN_ID="${LEVERS_SIGN_ID:-Levers Local Signing}"
+SIGN=(codesign --force --options runtime --entitlements Resources/Levers.entitlements)
 if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$SIGN_ID\""; then
-  codesign --force --sign "$SIGN_ID" "$APP"
+  "${SIGN[@]}" --sign "$SIGN_ID" "$APP"
   echo "Built $APP $VERSION ($BUILD), signed with \"$SIGN_ID\""
 else
-  codesign --force --sign - "$APP"
+  "${SIGN[@]}" --sign - "$APP"
   echo "Built $APP $VERSION ($BUILD), ad-hoc signed (no \"$SIGN_ID\" certificate found:"
   echo "  keyboard access must be re-granted after each rebuild; see the comment in this script)"
 fi
+
+# Fail loudly if the signature didn't take (a half-signed app won't launch right).
+codesign --verify --strict "$APP" || { echo "Signature check FAILED for $APP" >&2; exit 1; }
